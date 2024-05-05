@@ -1,0 +1,158 @@
+esphome:
+  name: mppt_controller
+  includes:
+    - mppt_controller.h
+  on_boot:
+    priority: -100
+    then:
+    - wait_until:  
+        condition:      #  any condition here
+          api.connected: 
+        timeout: 8s   
+
+esp32:
+  board: nodemcu-32s 
+
+# Enable logging
+logger:
+  baud_rate: 0
+  level: INFO
+
+# Enable Home Assistant API
+api:
+  password: ""
+
+ota:
+  password: ""
+
+wifi:
+  ssid: "Motyczka"
+  password: "Motyczka123"
+  use_address: 192.168.1.114
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Mppt Controller Fallback Hotspot"
+    password: "Nl5kzDn5fh0C"
+
+captive_portal:
+
+web_server:
+  port: 80
+  local: true
+
+mqtt:
+  broker: 192.168.1.107
+  username: mosquitto
+  password: mosquitto
+  topic_prefix: mppt_controller
+  client_id: mppt_controller
+
+uart:
+  id: mod_bus
+  rx_pin: GPIO3
+  tx_pin: GPIO1
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  # debug:
+  #   direction: BOTH
+  #   dummy_receiver: false
+  #   after:
+  #     delimiter: "\n"
+  #   sequence:
+  #     - lambda: UARTDebug::log_string(direction, bytes);
+
+sensor:
+  - platform: custom
+    lambda: |-
+      auto s = new mppt_controller(id(mod_bus));
+      App.register_component(s);
+      return {s->power_sensor, s->cwu_temperature_sensor, s->energy_total_sensor, s->enabled_sensor, s->voltage_sensor, s->current_sensor, s->max_power_sensor, s->max_temperature_sensor, s->low_voltage_detector_sensor, s->current_unit_temperature_sensor, s->current_pwm_value_sensor};
+    sensors:
+    - id: power_sensor
+      name: "Aktualna moc"
+      state_class: measurement
+      device_class: power
+      unit_of_measurement: W      
+      accuracy_decimals: 1
+    - id: cwu_temperature_sensor      
+      name: "Temperatura CWU"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      accuracy_decimals: 2
+    - id: energy_total_sensor      
+      name: "Aktualny uzysk energii"
+      unit_of_measurement: kWh
+      device_class: energy
+      state_class: total_increasing  
+      accuracy_decimals: 3 
+    - name: enabled_sensor
+      id: enabled_sensor
+      #internal: true
+    - id: voltage_sensor
+      name: "Aktualne napięcie z paneli"
+      unit_of_measurement: V
+      state_class: measurement
+      device_class: voltage
+      #accuracy_decimals: 1
+    - id: current_sensor
+      name: "Aktualny prad"
+      unit_of_measurement: A
+      state_class: measurement
+      device_class: current
+      accuracy_decimals: 1
+    - id: max_power_sensor
+      name: "Maksymalna osiągnieta moc"
+      unit_of_measurement: W
+      state_class: measurement
+      device_class: power
+      accuracy_decimals: 1
+    - id: max_temperature_sensor      
+      name: "Maksymalna temperatura"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      accuracy_decimals: 2
+    - id: low_voltage_detector_sensor      
+      name: "Ilość zadziałań detektora niskiego napięcia"            
+      state_class: measurement      
+    - id: current_unit_temperature_sensor      
+      name: "Aktualna temperatura invertera"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+      accuracy_decimals: 2
+    - id: current_pwm_value_sensor      
+      name: "Aktualna wartość PWM"            
+      state_class: measurement  
+      
+binary_sensor:
+  - platform: template
+    id: inverter_state
+    name: "State of the MPPT inverter"
+    device_class: CONNECTIVITY
+    lambda: 'return id(enabled_sensor).state > 0.5;'
+
+button:
+  - platform: template
+    name: "Zasilanie regulatora MPPT"
+    id: inverter_switch
+    on_press:
+      then:
+        - if:
+            condition: 
+              lambda: 'return id(inverter_state).state;'
+            then:
+              - uart.write: 'W'         
+            else:
+              - uart.write: 'Q'
+
+interval:
+  - interval: 8s
+    then:
+      - uart.write: 'S'
+      - delay: 4s
+      - uart.write: [0x61]
